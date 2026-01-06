@@ -1,0 +1,223 @@
+.verification-result {
+  margin-top: 32px;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(20px);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  animation: slideUp 0.5s ease-out;
+  box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Header Status */
+.result-header {
+  padding: 32px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Gradient Background for Header based on result */
+.real .result-header {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.1) 0%, transparent 100%);
+  border-left: 4px solid var(--success);
+}
+
+.fake .result-header {
+  background: linear-gradient(90deg, rgba(244, 63, 94, 0.1) 0%, transparent 100%);
+  border-left: 4px solid var(--danger);
+}
+
+.result-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.real .result-icon {
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--success);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+}
+
+.fake .result-icon {
+  background: rgba(244, 63, 94, 0.2);
+  color: var(--danger);
+  box-shadow: 0 0 20px rgba(244, 63, 94, 0.2);
+}
+
+.result-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.result-title h3 {
+  font-size: 1.75rem;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.real .result-title h3 {
+  color: var(--success);
+}
+
+.fake .result-title h3 {
+  color: var(--danger);
+}
+
+.result-title p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+/* Metadata Grid */
+.result-body {
+  padding: 32px;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.meta-item {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.meta-label {
+  display: block;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  letter-spacing: 0.05em;
+}
+
+.meta-value {
+  font-family: 'Space Mono', monospace;
+  font-size: 1.25rem;
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+/* Confidence Bar */
+.confidence-wrapper {
+  margin-bottom: 32px;
+}
+
+.conf-track {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.conf-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.real .conf-fill {
+  background: var(--success);
+  box-shadow: 0 0 15px var(--success);
+}
+
+.fake .conf-fill {
+  background: var(--danger);
+  box-shadow: 0 0 15px var(--danger);
+}
+
+/* Blockchain Proof Terminal */
+.blockchain-proof {
+  background: #020617;
+  border-radius: var(--radius-md);
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-family: 'Space Mono', monospace;
+  position: relative;
+}
+
+.proof-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.proof-title {
+  color: var(--primary);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.proof-status {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.proof-status.pending {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.proof-status.success {
+  color: var(--success);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.tx-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+}
+
+.tx-label {
+  color: var(--text-dim);
+  min-width: 80px;
+}
+
+.tx-val {
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.tx-link {
+  color: var(--primary);
+  text-decoration: underline;
+  margin-left: 8px;
+}
