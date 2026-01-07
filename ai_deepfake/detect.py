@@ -1,6 +1,7 @@
 """
-detect.py - Production Ready Deepfake Detector
+detect.py - Deepfake Detector v3.0 (Production + Face Extraction)
 """
+
 import torch
 import torch.nn as nn
 from torchvision import transforms, models
@@ -13,11 +14,19 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 from pathlib import Path
 
-# Import config (từ file bước 1)
+# Thư viện cắt mặt (Face Extraction)
+try:
+    from facenet_pytorch import MTCNN
+    FACE_DETECTION_AVAILABLE = True
+except ImportError:
+    FACE_DETECTION_AVAILABLE = False
+    print("Warning: 'facenet-pytorch' not found. Face extraction disabled.")
+
+# Import config
 try:
     from ai_config import settings
 except ImportError:
-    # Fallback nếu không có file config
+    # Fallback config
     class Settings:
         MODEL_DIR = Path(__file__).parent / "models"
         DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -29,7 +38,6 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DeepfakeDetector")
 
-# Check OpenCV
 try:
     import cv2
     CV2_AVAILABLE = True
@@ -83,13 +91,32 @@ class DeepfakeDetector:
         
         self.device = settings.DEVICE
         self.threshold = settings.DEFAULT_THRESHOLD
+        
+        # 1. Load Deepfake Models
         self._load_models()
+        
+        # 2. Load Face Detector (MTCNN)
+        if FACE_DETECTION_AVAILABLE:
+            try:
+                self.mtcnn = MTCNN(
+                    keep_all=False, 
+                    select_largest=True, 
+                    device=self.device,
+                    margin=20 # Lấy rộng ra một chút quanh mặt
+                )
+                logger.info("Face Detector (MTCNN) loaded.")
+            except Exception as e:
+                logger.error(f"Failed to load MTCNN: {e}")
+                self.mtcnn = None
+        else:
+            self.mtcnn = None
+
         self._setup_transforms()
         self._initialized = True
         logger.info(f"AI Engine initialized on {self.device}")
 
     def _load_models(self):
-        # Model V1
+        # Model V1 (EfficientNet-B0)
         try:
             self.model_v1 = models.efficientnet_b0(weights=None)
             self.model_v1.classifier = nn.Sequential(nn.Dropout(0.2), nn.Linear(1280, 2))
@@ -100,7 +127,7 @@ class DeepfakeDetector:
             logger.error(f"Failed to load Model V1: {e}")
             self.model_v1 = None
 
-        # Model V2
+        # Model V2 (EfficientNet-B4)
         try:
             self.model_v2 = _EfficientNetB4()
             ckpt = torch.load(settings.MODEL_DIR / 'best_model_v2.pth', map_location=self.device, weights_only=False)
@@ -111,7 +138,7 @@ class DeepfakeDetector:
             self.model_v2 = None
             
         if not self.model_v1 and not self.model_v2:
-            raise RuntimeError("CRITICAL: No models loaded!")
+            raise RuntimeError("CRITICAL: No deepfake detection models loaded!")
 
     def _setup_transforms(self):
         norm = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -119,6 +146,7 @@ class DeepfakeDetector:
         self.tx_v2 = transforms.Compose([transforms.Resize((380, 380)), transforms.ToTensor(), norm])
 
     def _analyze_signal(self, img_np):
+        """Phân tích tín hiệu ảnh (Frequency & Texture)"""
         if not CV2_AVAILABLE: return 0.0
         try:
             gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
@@ -131,12 +159,14 @@ class DeepfakeDetector:
             h, w = magnitude.shape
             center_y, center_x = h // 2, w // 2
             y, x = np.ogrid[:h, :w]
-            mask = (x - center_x)**2 + (y - center_y)**2 >= (min(h,w)//4)**2 # High frequency mask
+            # Mask che phần tần số thấp (trung tâm), chỉ lấy tần số cao (rìa)
+            mask = (x - center_x)**2 + (y - center_y)**2 >= (min(h,w)//4)**2 
             high_freq_energy = magnitude[mask].mean()
             
             boost = 0.0
-            if laplacian_var < 100: boost += 0.05 # Quá mịn (đặc trưng AI)
-            if high_freq_energy > 12.0: boost += 0.05 # Nhiễu tần số cao
+            # Ảnh deepfake thường: quá mịn (var thấp) hoặc nhiễu tần số cao (energy cao)
+            if laplacian_var < 100: boost += 0.03 
+            if high_freq_energy > 13.0: boost += 0.03 
             return boost
         except Exception:
             return 0.0
@@ -144,37 +174,69 @@ class DeepfakeDetector:
     def predict(self, image_path: str, threshold: float = None) -> DetectionResult:
         start_t = time.time()
         active_thresh = threshold or self.threshold
+        face_detected = False
         
         try:
-            img = Image.open(image_path).convert('RGB')
-            img_np = np.array(img)
+            # 1. Load ảnh
+            img_original = Image.open(image_path).convert('RGB')
+            img_to_process = img_original
+
+            # 2. Face Extraction (QUAN TRỌNG)
+            if self.mtcnn:
+                try:
+                    # MTCNN trả về tensor đã crop nếu tìm thấy mặt
+                    # Trả về None nếu không tìm thấy
+                    face_tensor = self.mtcnn(img_original)
+                    
+                    if face_tensor is not None:
+                        # Convert tensor ngược lại PIL Image để đưa vào pipeline cũ
+                        # Lưu ý: MTCNN đã normalize, nên cần denormalize hoặc convert khéo léo
+                        # Cách đơn giản: Dùng box để crop từ ảnh gốc
+                        boxes, _ = self.mtcnn.detect(img_original)
+                        if boxes is not None:
+                            box = boxes[0] # Lấy mặt to nhất
+                            img_to_process = img_original.crop(box)
+                            face_detected = True
+                            logger.info("Face detected and cropped.")
+                except Exception as e:
+                    logger.warning(f"MTCNN Error: {e}. Using full image.")
+
+            # 3. Chuẩn bị ảnh cho model
+            img_np = np.array(img_to_process)
             
-            # 1. Neural Network Inference
+            # 4. Neural Network Inference
             preds = []
             with torch.no_grad():
                 if self.model_v1:
-                    t_in = self.tx_v1(img).unsqueeze(0).to(self.device)
-                    prob = torch.softmax(self.model_v1(t_in), dim=1)[0, 0].item() # Class 0 assumed FAKE
+                    t_in = self.tx_v1(img_to_process).unsqueeze(0).to(self.device)
+                    # Class 0: Fake, Class 1: Real (Giả định theo training set của bạn)
+                    # Nếu ngược lại thì dùng [0, 1]
+                    prob = torch.softmax(self.model_v1(t_in), dim=1)[0, 0].item()
                     preds.append(prob * settings.V1_WEIGHT)
                 
                 if self.model_v2:
-                    t_in = self.tx_v2(img).unsqueeze(0).to(self.device)
+                    t_in = self.tx_v2(img_to_process).unsqueeze(0).to(self.device)
                     prob = torch.softmax(self.model_v2(t_in), dim=1)[0, 0].item()
                     preds.append(prob * settings.V2_WEIGHT)
             
+            if not preds:
+                return DetectionResult(False, 0.0, 0.0, RiskLevel.LOW, 0.0, {"error": "No model prediction"})
+
+            # Weighted Average
             ensemble_prob = sum(preds) / (settings.V1_WEIGHT + settings.V2_WEIGHT)
             
-            # 2. Signal Analysis Boost
+            # 5. Signal Analysis Boost
+            # Chỉ boost nếu ảnh là ảnh gốc hoặc ảnh crop chất lượng cao
             boost = self._analyze_signal(img_np)
-            final_prob = min(1.0, ensemble_prob + boost)
             
-            # 3. Decision
+            # 6. Final Logic
+            final_prob = min(1.0, ensemble_prob + boost)
             is_fake = final_prob >= active_thresh
             
-            # Risk Mapping
+            # 7. Risk Level
             if final_prob > 0.85: r = RiskLevel.CRITICAL
             elif final_prob > 0.65: r = RiskLevel.HIGH
-            elif final_prob > 0.35: r = RiskLevel.MEDIUM
+            elif final_prob > 0.40: r = RiskLevel.MEDIUM
             else: r = RiskLevel.LOW
             
             return DetectionResult(
@@ -183,12 +245,16 @@ class DeepfakeDetector:
                 fake_probability=final_prob,
                 risk_level=r,
                 processing_time=time.time() - start_t,
-                details={"model_score": ensemble_prob, "signal_boost": boost}
+                details={
+                    "face_detected": face_detected,
+                    "model_score": ensemble_prob, 
+                    "signal_boost": boost
+                }
             )
             
         except Exception as e:
             logger.error(f"Prediction Error: {e}")
             return DetectionResult(False, 0.0, 0.0, RiskLevel.LOW, 0.0, {"error": str(e)})
 
-# Khởi tạo sẵn instance
+# Khởi tạo instance
 detector = DeepfakeDetector()

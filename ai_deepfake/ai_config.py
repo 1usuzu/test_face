@@ -3,7 +3,7 @@ ai_config.py - Cấu hình tập trung cho AI Module
 """
 import os
 from pathlib import Path
-from pydantic_settings import BaseSettings # Cần cài đặt: pip install pydantic-settings
+from pydantic_settings import BaseSettings
 
 class AISettings(BaseSettings):
     # Cấu hình Model
@@ -20,7 +20,7 @@ class AISettings(BaseSettings):
     ENABLE_SIGNAL_ANALYSIS: bool = True
     
     class Config:
-        env_file = ".env"  # Có thể load từ file .env
+        env_file = ".env"  #  load từ file .env
 
 settings = AISettings()
 
