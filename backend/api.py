@@ -4,15 +4,18 @@ import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+# Use absolute repo paths to avoid uvicorn reload/import cwd quirks.
+_repo_root = Path(__file__).resolve().parent.parent
+
 # Add ai_deepfake to path for import
-_ai_path = Path(__file__).parent.parent / "ai_deepfake"
+_ai_path = _repo_root / "ai_deepfake"
 if _ai_path.exists():
     sys.path.insert(0, str(_ai_path))
 
 # Add did_system to path
-_did_path = Path(__file__).parent.parent / "did_system"
+_did_path = _repo_root / "did_system"
 if _did_path.exists():
-    sys.path.insert(0, str(Path(__file__).parent.parent))
+    sys.path.insert(0, str(_repo_root))
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +30,9 @@ def _load_local_env_file() -> None:
     if not env_file.exists():
         return
 
-    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+    # utf-8-sig strips a leading BOM; assign (not setdefault) so backend/.env wins over stale shell/IDE
+    # placeholders like SERVER_PRIVATE_KEY=0x_your_... that would otherwise block a fixed .env.
+    for raw_line in env_file.read_text(encoding="utf-8-sig").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -35,7 +40,7 @@ def _load_local_env_file() -> None:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         if key:
-            os.environ.setdefault(key, value)
+            os.environ[key] = value
 
 _load_local_env_file()
 
@@ -45,7 +50,9 @@ try:
     from detect import DeepfakeDetector
     DETECTOR_VERSION = "ensemble"
 except ImportError:
-    print("Warning: detect.py not found - AI detection disabled")
+    import traceback
+    print("Warning: failed to import AI detector (detect.DeepfakeDetector). AI detection disabled.")
+    traceback.print_exc()
     DETECTOR_VERSION = "none"
 
 from zkp_oracle import ZKPOracle
