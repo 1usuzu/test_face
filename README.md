@@ -76,6 +76,22 @@ zkp/
 - CUDA (khuyến nghị, để chạy AI trên GPU)
 - MetaMask extension
 
+### Điều kiện tối thiểu để chạy được (local)
+
+Để backend AI và API hoạt động (kể cả `/api/verify-zkp`), cần đồng thời:
+
+| Điều kiện | Giải thích |
+| --- | --- |
+| **Đúng Python + venv** | Cài dependency bằng `pip` **trong** `.venv` của repo (tránh lỗi `No module named 'torch'` do cài nhầm sang Python global). |
+| **`backend/requirements.txt`** | Bao gồm PyTorch và stack FastAPI; chạy `pip install -r backend/requirements.txt` sau khi kích hoạt venv. |
+| **Model** | File `ai_deepfake/models/best_model.pth` và `best_model_v2.pth` phải có mặt. |
+| **`SERVER_PRIVATE_KEY`** | Bắt buộc khi khởi động API. Có thể đặt trong `backend/.env` (xem `backend/.env.example`) hoặc biến môi trường. Chỉ **local dev**: có thể bật `ALLOW_INSECURE_DEV_KEY` + `INSECURE_DEV_PRIVATE_KEY` như trong hướng dẫn dưới — **không** dùng kiểu này trên server thật. |
+| **Restart backend** | Sau khi cài thêm package (ví dụ `torch`), cần restart process `uvicorn` để `/api/health` phản ánh `detector: true`. |
+
+**Python 3.13+:** wheel PyTorch trong `requirements.txt` có thể chưa khớp; nếu `pip install -r` thất bại, nên dùng Python **3.11 hoặc 3.12** hoặc cài PyTorch theo [hướng dẫn chính thức](https://pytorch.org/get-started/locally/) rồi cài các gói còn lại từ `requirements.txt`.
+
+**Cài nhanh trên Windows (một script):** từ thư mục gốc repo chạy `powershell -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1` (tùy chọn `-SkipNpm` nếu đã `npm install`). Thiết kế chi tiết: `docs/superpowers/specs/2026-04-11-local-onboarding-design.md`.
+
 ### 1. Cài đặt môi trường chung (Chạy 1 lần duy nhất)
 
 ```bash
@@ -131,9 +147,9 @@ Copy địa chỉ contract được mổ ra (ví dụ: `0x5FbDB2315678afecb367f0
 .venv\Scripts\activate  # Nhớ active venv
 
 # Thiết lập biến môi trường (dùng Private Key của Account #0 lấy từ output Hardhat)
-$env:SERVER_PRIVATE_KEY = "<YOUR_HARDHAT_ACCOUNT_0_PRIVATE_KEY>"
+$env:SERVER_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 $env:ALLOW_INSECURE_DEV_KEY = "true"
-$env:INSECURE_DEV_PRIVATE_KEY = "<YOUR_HARDHAT_ACCOUNT_0_PRIVATE_KEY>"
+$env:INSECURE_DEV_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 cd backend
 python -m uvicorn api:app --reload --port 8000
