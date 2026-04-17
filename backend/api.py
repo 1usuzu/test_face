@@ -370,21 +370,31 @@ async def verify_image_zkp(
                 "confidence": 0.0,
             }
 
+        fake_p = float(detection_result.fake_probability)
         result = {
             "label": "FAKE" if detection_result.is_fake else "REAL",
             "confidence": detection_result.confidence,
-            "risk_level": detection_result.risk_level.value
+            "fake_prob": fake_p,
+            "real_prob": 1.0 - fake_p,
+            "risk_level": detection_result.risk_level.value,
         }
-        
+
         timestamp = int(time.time())
-        
+
         # 2. Chỉ ảnh REAL mới có thể tạo ZK Proof
         if result["label"] != "REAL":
             return {
+                "status": "ok",
                 "can_generate_proof": False,
                 "message": "Chỉ ảnh REAL mới có thể tạo Zero-Knowledge Proof",
                 "label": result["label"],
-                "confidence": result["confidence"]
+                "confidence": result["confidence"],
+                "fake_prob": result["fake_prob"],
+                "real_prob": result["real_prob"],
+                "risk_level": result["risk_level"],
+                "image_hash": image_hash,
+                "filename": file.filename,
+                "detector_version": DETECTOR_VERSION,
             }
         
         # 3. Tạo ZKP Input
@@ -403,19 +413,24 @@ async def verify_image_zkp(
         signature = signed_message.signature.hex()
         
         return {
+            "status": "ok",
             "can_generate_proof": True,
             "label": result["label"],
             "confidence": result["confidence"],
+            "fake_prob": result["fake_prob"],
+            "real_prob": result["real_prob"],
+            "risk_level": result["risk_level"],
             "image_hash": image_hash,
             "filename": file.filename,
-            
+            "detector_version": DETECTOR_VERSION,
+
             # ZKP specific data
             "zkp_input": {
                 "oracle_secret": zkp_input.oracle_secret,
                 "timestamp": zkp_input.timestamp,
                 "oracle_address": zkp_oracle.oracle_address
             },
-            
+
             # Legacy support
             "signature": signature
         }

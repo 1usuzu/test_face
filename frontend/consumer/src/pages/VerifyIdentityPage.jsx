@@ -43,7 +43,7 @@ const VerifyIdentityPage = () => {
 
       const res = await verifyIdentity(proof, publicSignals);
       setResult(res);
-    } catch (error) {
+    } catch {
       setResult({ success: false, message: "Lỗi đọc file JSON: Cần file JSON hợp lệ của snarkjs." });
     }
   };
@@ -106,3 +106,4 @@ const VerifyIdentityPage = () => {
 };
 
 export default VerifyIdentityPage;
+

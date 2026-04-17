@@ -49,6 +49,25 @@ const getReadableError = (error) => {
   return error.shortMessage || error.reason || error.message || String(error);
 };
 
+/**
+ * `/api/verify-zkp` now returns `fake_prob` and `real_prob` (parity with `/api/verify`).
+ * Legacy fallback: if an older server omits probabilities, derive them from `label` +
+ * post-PR2 `confidence` (class certainty), never by assuming `fake_prob === confidence`.
+ */
+function normalizeVerifyZkpResponse(result) {
+  if (typeof result.fake_prob === 'number' && typeof result.real_prob === 'number') {
+    return { ...result };
+  }
+  const c = Number(result.confidence ?? 0);
+  if (result.label === 'REAL') {
+    return { ...result, real_prob: c, fake_prob: 1 - c };
+  }
+  if (result.label === 'FAKE') {
+    return { ...result, fake_prob: c, real_prob: 1 - c };
+  }
+  return { ...result };
+}
+
 function App() {
   const [account, setAccount] = useState(null);
   const [contract, setContract] = useState(null);
@@ -293,14 +312,8 @@ function App() {
       }
       const result = await response.json();
 
-      const hasRealProb = typeof result.real_prob === 'number';
-      const hasFakeProb = typeof result.fake_prob === 'number';
-      const confidence = Number(result.confidence || 0);
-
       const normalizedResult = {
-        ...result,
-        real_prob: hasRealProb ? result.real_prob : 1 - confidence,
-        fake_prob: hasFakeProb ? result.fake_prob : confidence,
+        ...normalizeVerifyZkpResponse(result),
         onChain: false,
         pendingReason: null,
         onChainError: null

@@ -32,7 +32,7 @@ except ImportError:
         class Settings:
             MODEL_DIR = Path(__file__).parent / "models"
             DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-            DEFAULT_THRESHOLD = 0.5
+            DEFAULT_THRESHOLD = 0.65
             V1_WEIGHT, V2_WEIGHT = 0.4, 0.6
             ENABLE_SIGNAL_ANALYSIS = True
             SIGNAL_LAPLACIAN_THRESHOLD = 100.0

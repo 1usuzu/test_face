@@ -19,6 +19,45 @@ const RISK_COLOR = {
   critical: '#7c3aed',
 }
 
+/** Display bands (fake_probability). Backend decision threshold remains 0.65. */
+const BAND_REVIEW_MIN = 0.4
+const BAND_FAKE_MIN = 0.65
+
+/**
+ * @returns {'likely_authentic' | 'review_needed' | 'fake_detected'}
+ */
+function tierFromFakeProb(fakeProb) {
+  const p = Number(fakeProb)
+  if (!Number.isFinite(p)) return 'review_needed'
+  if (p < BAND_REVIEW_MIN) return 'likely_authentic'
+  if (p >= BAND_FAKE_MIN) return 'fake_detected'
+  return 'review_needed'
+}
+
+const TIER_UI = {
+  likely_authentic: {
+    title: 'Likely Authentic',
+    subtitle:
+      'Fake probability is below 40%. The image is consistent with authentic media under this policy.',
+    barLabel: 'Real likelihood',
+    barFraction: (realProb) => realProb,
+  },
+  review_needed: {
+    title: 'Review Needed / Suspicious',
+    subtitle:
+      'Fake probability is between 40% and 65%. Treat as suspicious; additional review is recommended.',
+    barLabel: 'Fake likelihood (suspicious band)',
+    barFraction: (_realProb, fakeProb) => fakeProb,
+  },
+  fake_detected: {
+    title: 'Fake Detected',
+    subtitle:
+      'Fake probability is at or above 65% — strong indication of manipulation or synthetic content.',
+    barLabel: 'Fake likelihood',
+    barFraction: (_realProb, fakeProb) => fakeProb,
+  },
+}
+
 function CopyButton({ text }) {
   const handleCopy = () => {
     navigator.clipboard.writeText(text).then(() => alert('Link copied to clipboard!'))
@@ -39,12 +78,30 @@ function CopyButton({ text }) {
 }
 
 function VerificationResult({ result }) {
-  const isReal = result.label === 'REAL'
+  const statusVal = result.status
+  const isNonClassifiable =
+    result.label === 'ERROR' || (statusVal != null && statusVal !== 'ok')
+
   const realProb = Number(result.real_prob ?? 0)
   const fakeProb = Number(result.fake_prob ?? 0)
-  const confidenceScore = isReal ? realProb : fakeProb
-  const confidence = (Math.max(0, Math.min(1, confidenceScore)) * 100).toFixed(1)
-  const riskLevel = result.risk_level || (isReal ? 'low' : 'high')
+
+  const tier = isNonClassifiable ? null : tierFromFakeProb(fakeProb)
+  const tierUi = tier ? TIER_UI[tier] : null
+
+  const cardTone = isNonClassifiable
+    ? 'unavailable'
+    : tier === 'likely_authentic'
+      ? 'real'
+      : tier === 'review_needed'
+        ? 'suspicious'
+        : 'fake'
+
+  const barFraction = tierUi ? tierUi.barFraction(realProb, fakeProb) : 0
+  const barPct = (Math.max(0, Math.min(1, barFraction)) * 100).toFixed(1)
+
+  const riskLevel =
+    result.risk_level ||
+    (isNonClassifiable ? 'unknown' : tier === 'likely_authentic' ? 'low' : tier === 'review_needed' ? 'medium' : 'high')
   const riskColor = RISK_COLOR[riskLevel] || 'var(--text-muted)'
 
   // verification_link: either from API result, or construct from consumer app URL + image_hash
@@ -74,12 +131,20 @@ function VerificationResult({ result }) {
   };
 
   return (
-    <div className={`verification-result ${isReal ? 'real' : 'fake'}`}>
+    <div className={`verification-result ${cardTone}`}>
       <div className="result-header">
         <div className="result-icon">
-          {isReal ? (
+          {isNonClassifiable ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+          ) : tier === 'likely_authentic' ? (
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          ) : tier === 'review_needed' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           ) : (
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -88,11 +153,16 @@ function VerificationResult({ result }) {
           )}
         </div>
         <div className="result-title">
-          <h3 className="brand-font">{isReal ? 'Authentic Media Verified' : 'Deepfake Manipulation Detected'}</h3>
-          <p>{isReal
-            ? 'No artificial manipulation traces found in image spectrum analysis.'
-            : 'High probability of AI-generated artifacts or facial manipulation detected.'
-          }</p>
+          <h3 className="brand-font">
+            {isNonClassifiable
+              ? 'Verification Unavailable'
+              : tierUi?.title}
+          </h3>
+          <p>
+            {isNonClassifiable
+              ? (result.message || 'The image could not be classified safely. Try a clearer face photo.')
+              : tierUi?.subtitle}
+          </p>
         </div>
       </div>
 
@@ -100,25 +170,46 @@ function VerificationResult({ result }) {
         {/* Confidence */}
         <div className="confidence-wrapper">
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <span className="meta-label">AI Confidence Score</span>
-            <span className="meta-value" style={{ fontSize: '1rem' }}>{confidence}%</span>
+            <span className="meta-label">{tierUi ? tierUi.barLabel : 'Score'}</span>
+            <span className="meta-value" style={{ fontSize: '1rem' }}>{isNonClassifiable ? '—' : `${barPct}%`}</span>
           </div>
           <div className="conf-track">
-            <div className="conf-fill" style={{ width: `${confidence}%` }}></div>
+            <div className="conf-fill" style={{ width: `${isNonClassifiable ? 0 : barPct}%` }}></div>
           </div>
+          {!isNonClassifiable && (
+            <p className="tier-band-hint">
+              Bands: &lt;40% likely authentic · 40–65% review · ≥65% fake (same as model decision threshold)
+            </p>
+          )}
         </div>
 
         {/* Probability grid */}
         <div className="meta-grid">
           <div className="meta-item">
             <span className="meta-label">Real Probability</span>
-            <span className="meta-value" style={{ color: isReal ? 'var(--success)' : 'var(--text-muted)' }}>
+            <span
+              className="meta-value"
+              style={{
+                color:
+                  tier === 'likely_authentic' ? 'var(--success)' : 'var(--text-muted)',
+              }}
+            >
               {(realProb * 100).toFixed(2)}%
             </span>
           </div>
           <div className="meta-item">
             <span className="meta-label">Fake Probability</span>
-            <span className="meta-value" style={{ color: !isReal ? 'var(--danger)' : 'var(--text-muted)' }}>
+            <span
+              className="meta-value"
+              style={{
+                color:
+                  tier === 'fake_detected'
+                    ? 'var(--danger)'
+                    : tier === 'review_needed'
+                      ? 'var(--warn)'
+                      : 'var(--text-muted)',
+              }}
+            >
               {(fakeProb * 100).toFixed(2)}%
             </span>
           </div>
@@ -267,3 +358,4 @@ function VerificationResult({ result }) {
 }
 
 export default VerificationResult
+

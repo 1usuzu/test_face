@@ -67,4 +67,3 @@ docs/per_image_diff.csv
 docs/baseline_frozen_reproduced.json
 docs/baseline_hardened_same_protocol.json
 frontend/consumer_output.txt
-ai_deepfake/models/

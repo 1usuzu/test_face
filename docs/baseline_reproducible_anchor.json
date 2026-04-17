@@ -24,7 +24,7 @@
         "real_folder_label": "real"
       }
     },
-    "threshold": 0.5,
+    "threshold": 0.65,
     "lineage": {
       "baseline_ai_feature_commit": "8905873",
       "pr2_commit": "b48c017",

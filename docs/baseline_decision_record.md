@@ -30,7 +30,7 @@ Sau C0 lineage reconciliation:
 ## Frozen assumptions for this decision
 
 - Dataset path (actual used): `D:\Codes\face\ai_deepfake\dataset_final\test`
-- Threshold: `0.5`
+- Default operating threshold: **`0.65`** (C1 policy; C0 lineage tables in `docs/benchmark_lineage_report.md` used `0.5` where labeled.)
 - Lineage commit (AI feature baseline lineage): `8905873`
 - Script lineage:
   - `ai_deepfake/test_model.py` (from commit `8905873`)

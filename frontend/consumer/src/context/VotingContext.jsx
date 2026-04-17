@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useState, useEffect } from "react";
 import { BrowserProvider, Contract, isAddress } from "ethers";
 
@@ -360,3 +361,4 @@ export const VotingProvider = ({ children }) => {
     </VotingContext.Provider>
   );
 };
+
