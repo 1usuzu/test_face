@@ -77,7 +77,7 @@ class TestDetectionResult:
 
 class TestConfig:
     def test_config_defaults(self):
-        assert settings.DEFAULT_THRESHOLD == 0.50
+        assert settings.DEFAULT_THRESHOLD == 0.65
         assert settings.V1_WEIGHT == 0.4
         assert settings.V2_WEIGHT == 0.6
         assert settings.ENABLE_TTA is False
@@ -111,7 +111,7 @@ class _FakeMTCNNRaises:
 def _make_test_detector(
     fake_prob_v1: float | None = 0.9,
     fake_prob_v2: float | None = None,
-    threshold: float = 0.5,
+    threshold: float = 0.65,
     mtcnn=None,
     signal_boost: float = 0.0,
 ) -> DeepfakeDetector:
@@ -139,7 +139,7 @@ def _make_temp_image() -> str:
 
 class TestInferenceContract:
     def test_fake_high_probability_case(self):
-        detector = _make_test_detector(fake_prob_v1=0.9, threshold=0.5)
+        detector = _make_test_detector(fake_prob_v1=0.9)
         image_path = _make_temp_image()
         try:
             result = detector.predict(image_path)
@@ -152,7 +152,7 @@ class TestInferenceContract:
         assert result.confidence == pytest.approx(0.9, abs=1e-6)
 
     def test_real_low_fake_probability_case(self):
-        detector = _make_test_detector(fake_prob_v1=0.2, threshold=0.5)
+        detector = _make_test_detector(fake_prob_v1=0.2)
         image_path = _make_temp_image()
         try:
             result = detector.predict(image_path)
@@ -169,7 +169,7 @@ class TestInferenceContract:
         [(0.8, True, 0.8), (0.2, False, 0.8)],
     )
     def test_confidence_semantics_for_real_vs_fake(self, fake_prob, expected_is_fake, expected_confidence):
-        detector = _make_test_detector(fake_prob_v1=fake_prob, threshold=0.5)
+        detector = _make_test_detector(fake_prob_v1=fake_prob)
         image_path = _make_temp_image()
         try:
             result = detector.predict(image_path)
@@ -245,7 +245,7 @@ class TestInferenceContract:
         ],
     )
     def test_risk_level_boundaries(self, fake_prob, expected_risk):
-        detector = _make_test_detector(fake_prob_v1=fake_prob, threshold=0.5)
+        detector = _make_test_detector(fake_prob_v1=fake_prob)
         image_path = _make_temp_image()
         try:
             result = detector.predict(image_path)

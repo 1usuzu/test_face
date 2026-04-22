@@ -32,9 +32,10 @@
 
 ### Threshold and scoring
 
-- Threshold: `0.5`
+- Default operating threshold (runtime / C1 policy): **`0.65`**
 - Fake score semantics: `fake_probability` from ensemble pipeline
-- Decision: `pred_is_fake = fake_probability >= 0.5`
+- Decision: `pred_is_fake = fake_probability >= 0.65`
+- Historical note: C0 lineage comparison reports used threshold `0.5` where explicitly stated; current repo default is `0.65`.
 
 ### Commit lineage references
 
@@ -62,7 +63,7 @@
 
 1. Verify dataset path exists and split folders are unchanged.
 2. Verify both model file hashes exactly match frozen values.
-3. Verify threshold is `0.5`.
+3. Verify threshold is `0.65` (or document explicitly if reproducing a historical `0.5` run).
 4. Verify outputs are exported as:
    - per-run JSON
    - per-image diff CSV (when comparing runs)

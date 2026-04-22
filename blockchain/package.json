@@ -4,7 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "deploy:amoy": "hardhat run scripts/deploy.js --network amoy",
+    "deploy:amoy:deepfake": "set DEPLOY_ONLY=deepfake&& hardhat run scripts/deploy.js --network amoy",
+    "deploy:amoy:voting": "set DEPLOY_ONLY=voting&& hardhat run scripts/deploy.js --network amoy",
+    "deploy:amoy:deepfake:cheap": "set DEPLOY_ONLY=deepfake&& set SOLC_OPTIMIZER_RUNS=1&& set DEPLOY_BUFFER_PERCENT=0&& hardhat run scripts/deploy.js --network amoy",
+    "deploy:amoy:deepfake:lowfee": "set DEPLOY_ONLY=deepfake&& set SOLC_OPTIMIZER_RUNS=1&& set DEPLOY_BUFFER_PERCENT=0&& set TX_MAX_FEE_GWEI=25&& set TX_MAX_PRIORITY_FEE_GWEI=25&& hardhat run scripts/deploy.js --network amoy"
   },
   "keywords": [],
   "author": "",
@@ -18,6 +23,7 @@
     "@typechain/ethers-v6": "^0.5.1",
     "@typechain/hardhat": "^9.1.0",
     "chai": "^4.5.0",
+    "dotenv": "^17.4.2",
     "ethers": "^6.16.0",
     "hardhat": "^2.22.0",
     "hardhat-gas-reporter": "^1.0.10",

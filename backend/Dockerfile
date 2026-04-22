@@ -18,5 +18,5 @@ EXPOSE 8000
 
 # Run from backend directory so local module imports (e.g. zkp_oracle) resolve.
 WORKDIR /app/backend
-CMD ["python", "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
 

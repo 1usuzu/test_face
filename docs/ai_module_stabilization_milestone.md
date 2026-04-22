@@ -22,7 +22,7 @@
 
 - Reproducible technical anchor: **94.00%** under frozen C0.5 protocol.
 - Dataset path used in reconciliation: `D:\Codes\face\ai_deepfake\dataset_final\test`
-- Threshold in frozen comparison protocol: `0.5`
+- Default operating threshold in repo (C1): **`0.65`** (C0 benchmark text may reference `0.5` where historical.)
 - Local model file hashes and sizes are recorded in baseline governance docs.
 
 ## Threshold policy (C1 decision)

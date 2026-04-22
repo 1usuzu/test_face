@@ -1,4 +1,4 @@
-import React, { useContext, useState, useRef } from "react";
+import { useContext, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { VotingContext } from "../context/VotingContext";
 
@@ -43,7 +43,7 @@ const VerifyIdentityPage = () => {
 
       const res = await verifyIdentity(proof, publicSignals);
       setResult(res);
-    } catch (error) {
+    } catch {
       setResult({ success: false, message: "Lỗi đọc file JSON: Cần file JSON hợp lệ của snarkjs." });
     }
   };
@@ -106,3 +106,4 @@ const VerifyIdentityPage = () => {
 };
 
 export default VerifyIdentityPage;
+

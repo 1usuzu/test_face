@@ -4,15 +4,18 @@ import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+# Use absolute repo paths to avoid uvicorn reload/import cwd quirks.
+_repo_root = Path(__file__).resolve().parent.parent
+
 # Add ai_deepfake to path for import
-_ai_path = Path(__file__).parent.parent / "ai_deepfake"
+_ai_path = _repo_root / "ai_deepfake"
 if _ai_path.exists():
     sys.path.insert(0, str(_ai_path))
 
 # Add did_system to path
-_did_path = Path(__file__).parent.parent / "did_system"
+_did_path = _repo_root / "did_system"
 if _did_path.exists():
-    sys.path.insert(0, str(Path(__file__).parent.parent))
+    sys.path.insert(0, str(_repo_root))
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +30,9 @@ def _load_local_env_file() -> None:
     if not env_file.exists():
         return
 
-    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+    # utf-8-sig strips a leading BOM; assign (not setdefault) so backend/.env wins over stale shell/IDE
+    # placeholders like SERVER_PRIVATE_KEY=0x_your_... that would otherwise block a fixed .env.
+    for raw_line in env_file.read_text(encoding="utf-8-sig").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -35,7 +40,7 @@ def _load_local_env_file() -> None:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         if key:
-            os.environ.setdefault(key, value)
+            os.environ[key] = value
 
 _load_local_env_file()
 
@@ -45,7 +50,9 @@ try:
     from detect import DeepfakeDetector
     DETECTOR_VERSION = "ensemble"
 except ImportError:
-    print("Warning: detect.py not found - AI detection disabled")
+    import traceback
+    print("Warning: failed to import AI detector (detect.DeepfakeDetector). AI detection disabled.")
+    traceback.print_exc()
     DETECTOR_VERSION = "none"
 
 from zkp_oracle import ZKPOracle
@@ -65,9 +72,9 @@ SERVER_PRIVATE_KEY = os.environ.get("SERVER_PRIVATE_KEY")
 ALLOW_INSECURE_DEV_KEY = os.environ.get("ALLOW_INSECURE_DEV_KEY", "false").lower() == "true"
 INSECURE_DEV_PRIVATE_KEY = os.environ.get("INSECURE_DEV_PRIVATE_KEY")
 
-# CORS origins: mặc định chỉ cho frontend local
-_default_origins = "http://localhost:5173,http://127.0.0.1:5173"
-_origins_env = os.environ.get("ALLOWED_ORIGINS", _default_origins)
+# CORS origins: read from ALLOWED_ORIGINS env (comma-separated).
+# Example: "https://app.vercel.app,https://consumer.vercel.app"
+_origins_env = os.environ.get("ALLOWED_ORIGINS", "*")
 ALLOWED_ORIGINS = [origin.strip() for origin in _origins_env.split(",") if origin.strip()]
 ALLOW_CREDENTIALS = "*" not in ALLOWED_ORIGINS
 
@@ -363,21 +370,31 @@ async def verify_image_zkp(
                 "confidence": 0.0,
             }
 
+        fake_p = float(detection_result.fake_probability)
         result = {
             "label": "FAKE" if detection_result.is_fake else "REAL",
             "confidence": detection_result.confidence,
-            "risk_level": detection_result.risk_level.value
+            "fake_prob": fake_p,
+            "real_prob": 1.0 - fake_p,
+            "risk_level": detection_result.risk_level.value,
         }
-        
+
         timestamp = int(time.time())
-        
+
         # 2. Chỉ ảnh REAL mới có thể tạo ZK Proof
         if result["label"] != "REAL":
             return {
+                "status": "ok",
                 "can_generate_proof": False,
                 "message": "Chỉ ảnh REAL mới có thể tạo Zero-Knowledge Proof",
                 "label": result["label"],
-                "confidence": result["confidence"]
+                "confidence": result["confidence"],
+                "fake_prob": result["fake_prob"],
+                "real_prob": result["real_prob"],
+                "risk_level": result["risk_level"],
+                "image_hash": image_hash,
+                "filename": file.filename,
+                "detector_version": DETECTOR_VERSION,
             }
         
         # 3. Tạo ZKP Input
@@ -396,19 +413,24 @@ async def verify_image_zkp(
         signature = signed_message.signature.hex()
         
         return {
+            "status": "ok",
             "can_generate_proof": True,
             "label": result["label"],
             "confidence": result["confidence"],
+            "fake_prob": result["fake_prob"],
+            "real_prob": result["real_prob"],
+            "risk_level": result["risk_level"],
             "image_hash": image_hash,
             "filename": file.filename,
-            
+            "detector_version": DETECTOR_VERSION,
+
             # ZKP specific data
             "zkp_input": {
                 "oracle_secret": zkp_input.oracle_secret,
                 "timestamp": zkp_input.timestamp,
                 "oracle_address": zkp_oracle.oracle_address
             },
-            
+
             # Legacy support
             "signature": signature
         }
@@ -633,4 +655,4 @@ async def get_did_info():
 
 
 if __name__ == "__main__":
-    uvicorn.run("api:app", host="0.0.0.0", port=8000)
+    uvicorn.run("api:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
