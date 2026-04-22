@@ -7,20 +7,13 @@ import torch.nn as nn
 from torchvision import transforms, models
 from PIL import Image
 import numpy as np
+import os
 import logging
 import time
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict, field
 from enum import Enum
 from pathlib import Path
-
-# Thư viện cắt mặt (Face Extraction)
-try:
-    from facenet_pytorch import MTCNN
-    FACE_DETECTION_AVAILABLE = True
-except ImportError:
-    FACE_DETECTION_AVAILABLE = False
-    print("Warning: 'facenet-pytorch' not found. Face extraction disabled.")
 
 # Import config — 3-tier: package-relative → absolute → fallback
 try:
@@ -35,6 +28,8 @@ except ImportError:
             DEFAULT_THRESHOLD = 0.65
             V1_WEIGHT, V2_WEIGHT = 0.4, 0.6
             ENABLE_SIGNAL_ANALYSIS = True
+            FACE_DETECTOR_BACKEND = "haar"
+            FACE_DETECTION_STRICT = False
             SIGNAL_LAPLACIAN_THRESHOLD = 100.0
             SIGNAL_HIGH_FREQ_THRESHOLD = 13.0
             SIGNAL_BOOST_STEP = 0.03
@@ -50,6 +45,15 @@ try:
 except ImportError:
     CV2_AVAILABLE = False
     logger.warning("OpenCV not found. Signal analysis disabled.")
+
+MTCNN = None
+USE_MTCNN = settings.FACE_DETECTOR_BACKEND.lower() == "mtcnn" or os.environ.get("USE_MTCNN", "false").lower() == "true"
+if USE_MTCNN:
+    try:
+        from facenet_pytorch import MTCNN as _MTCNN
+        MTCNN = _MTCNN
+    except ImportError:
+        logger.warning("'facenet-pytorch' not found. Falling back to non-MTCNN face detection.")
 
 class DetectionStatus(Enum):
     OK = "ok"
@@ -118,25 +122,40 @@ class DeepfakeDetector:
         
         self.device = settings.DEVICE
         self.threshold = settings.DEFAULT_THRESHOLD
+        self.face_backend = str(getattr(settings, "FACE_DETECTOR_BACKEND", "haar")).lower()
+        self.face_detection_strict = bool(getattr(settings, "FACE_DETECTION_STRICT", False))
         
         # 1. Load Deepfake Models
         self._load_models()
         
-        # 2. Load Face Detector (MTCNN)
-        if FACE_DETECTION_AVAILABLE:
+        # 2. Load Face Detector backend (memory-friendly default: Haar)
+        self.mtcnn = None
+        self.haar_detector = None
+        if self.face_backend == "mtcnn" and MTCNN is not None:
             try:
                 self.mtcnn = MTCNN(
-                    keep_all=False, 
-                    select_largest=True, 
+                    keep_all=False,
+                    select_largest=True,
                     device=self.device,
-                    margin=20 # Lấy rộng ra một chút quanh mặt
+                    margin=20
                 )
-                logger.info("Face Detector (MTCNN) loaded.")
+                logger.info("Face detector backend: MTCNN")
             except Exception as e:
                 logger.error(f"Failed to load MTCNN: {e}")
                 self.mtcnn = None
+        elif self.face_backend == "haar":
+            if CV2_AVAILABLE:
+                cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+                self.haar_detector = cv2.CascadeClassifier(cascade_path)
+                if self.haar_detector.empty():
+                    self.haar_detector = None
+                    logger.warning("Failed to load OpenCV Haar cascade face detector.")
+                else:
+                    logger.info("Face detector backend: OpenCV Haar cascade")
+            else:
+                logger.warning("OpenCV not available. Face detector backend disabled.")
         else:
-            self.mtcnn = None
+            logger.info("Face detector backend disabled; center-crop fallback only.")
 
         self._setup_transforms()
         self._initialized = True
@@ -216,51 +235,89 @@ class DeepfakeDetector:
         except Exception:
             return 0.0
 
+    def _center_crop(self, img: Image.Image, ratio: float = 0.85) -> Image.Image:
+        w, h = img.size
+        cw = max(1, int(w * ratio))
+        ch = max(1, int(h * ratio))
+        left = (w - cw) // 2
+        top = (h - ch) // 2
+        return img.crop((left, top, left + cw, top + ch))
+
+    def _extract_with_haar(self, img_original: Image.Image) -> Optional[Image.Image]:
+        if getattr(self, "haar_detector", None) is None or not CV2_AVAILABLE:
+            return None
+        img_np = np.array(img_original)
+        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+        faces = self.haar_detector.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(64, 64)
+        )
+        if faces is None or len(faces) == 0:
+            return None
+        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+        margin = int(min(w, h) * 0.15)
+        x1 = max(0, x - margin)
+        y1 = max(0, y - margin)
+        x2 = min(img_original.width, x + w + margin)
+        y2 = min(img_original.height, y + h + margin)
+        return img_original.crop((x1, y1, x2, y2))
+
     def predict(self, image_path: str, threshold: float = None) -> DetectionResult:
         start_t = time.time()
         active_thresh = threshold or self.threshold
         face_detected = False
+        face_backend = getattr(self, "face_backend", "mtcnn" if getattr(self, "mtcnn", None) is not None else "haar")
+        face_detection_strict = getattr(
+            self,
+            "face_detection_strict",
+            getattr(self, "mtcnn", None) is not None
+        )
         
         try:
             # 1. Load ảnh
             img_original = Image.open(image_path).convert('RGB')
             img_to_process = img_original
 
-            # 2. Face Extraction (QUAN TRỌNG)
-            if self.mtcnn:
-                try:
+            # 2. Face extraction (hybrid mode for low-memory environments)
+            try:
+                face_crop = None
+                if face_backend == "mtcnn" and getattr(self, "mtcnn", None):
                     boxes, _ = self.mtcnn.detect(img_original)
                     if boxes is not None and len(boxes) > 0:
-                        box = boxes[0] # Lấy mặt to nhất
-                        img_to_process = img_original.crop(box)
-                        face_detected = True
-                        logger.info("Face detected and cropped.")
-                    
-                    # BẮT BUỘC: Nếu bật Face Detection mà không tìm thấy mặt, phải báo lỗi
-                    if not face_detected:
-                        logger.warning("No face detected in the image.")
+                        face_crop = img_original.crop(boxes[0])
+                elif face_backend == "haar":
+                    face_crop = self._extract_with_haar(img_original)
+
+                if face_crop is not None:
+                    img_to_process = face_crop
+                    face_detected = True
+                else:
+                    if face_detection_strict and face_backend in ("mtcnn", "haar"):
                         return DetectionResult(
-                            is_fake=False, 
-                            confidence=0.0, 
-                            fake_probability=0.0, 
-                            risk_level=RiskLevel.LOW, 
+                            is_fake=False,
+                            confidence=0.0,
+                            fake_probability=0.0,
+                            risk_level=RiskLevel.LOW,
                             processing_time=time.time() - start_t,
-                            details={"error": "NO_FACE_DETECTED", "face_detected": False},
+                            details={"error": "NO_FACE_DETECTED", "face_detected": False, "face_backend": face_backend},
                             status=DetectionStatus.NO_FACE
                         )
-
-                except Exception as e:
-                    logger.warning(f"MTCNN Error: {e}. Using fallback safety.")
-                    # Trong production, nếu MTCNN lỗi thì nên từ chối luôn để đảm bảo an toàn
+                    img_to_process = self._center_crop(img_original)
+            except Exception as e:
+                if face_detection_strict:
                     return DetectionResult(
-                        is_fake=False, 
-                        confidence=0.0, 
-                        fake_probability=0.0, 
-                        risk_level=RiskLevel.LOW, 
+                        is_fake=False,
+                        confidence=0.0,
+                        fake_probability=0.0,
+                        risk_level=RiskLevel.LOW,
                         processing_time=time.time() - start_t,
-                            details={"error": f"FACE_DETECTION_ERROR: {str(e)}", "face_detected": False},
-                            status=DetectionStatus.FACE_DETECTION_ERROR
+                        details={"error": f"FACE_DETECTION_ERROR: {str(e)}", "face_detected": False, "face_backend": face_backend},
+                        status=DetectionStatus.FACE_DETECTION_ERROR
                     )
+                logger.warning(f"Face detection fallback due to error: {e}")
+                img_to_process = self._center_crop(img_original)
 
             # 3. Chuẩn bị ảnh cho model (chỗ này img_to_process đã là ảnh crop)
             img_np = np.array(img_to_process)
@@ -317,6 +374,7 @@ class DeepfakeDetector:
                 processing_time=time.time() - start_t,
                 details={
                     "face_detected": face_detected,
+                    "face_backend": face_backend,
                     "model_score": ensemble_prob, 
                     "signal_boost": boost
                 },

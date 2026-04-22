@@ -28,6 +28,13 @@ class AISettings(BaseSettings):
     
     ENABLE_TTA: bool = False
     ENABLE_SIGNAL_ANALYSIS: bool = True
+    # Face detection backend:
+    # - "haar": lightweight OpenCV Haar cascade (recommended for low-memory hosts)
+    # - "mtcnn": facenet-pytorch MTCNN
+    # - "none": skip face detection and use center-crop fallback
+    FACE_DETECTOR_BACKEND: str = "haar"
+    # If true, detector returns NO_FACE / FACE_DETECTION_ERROR instead of fallback center-crop.
+    FACE_DETECTION_STRICT: bool = False
 
     SIGNAL_LAPLACIAN_THRESHOLD: float = 100.0
     SIGNAL_HIGH_FREQ_THRESHOLD: float = 13.0

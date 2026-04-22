@@ -24,6 +24,7 @@ from eth_account.messages import encode_defunct
 import uvicorn
 import hashlib
 import tempfile
+import threading
 
 def _load_local_env_file() -> None:
     env_file = Path(__file__).parent / ".env"
@@ -79,6 +80,8 @@ ALLOWED_ORIGINS = [origin.strip() for origin in _origins_env.split(",") if origi
 ALLOW_CREDENTIALS = "*" not in ALLOWED_ORIGINS
 
 detector = None
+detector_init_error = None
+detector_lock = threading.Lock()
 zkp_oracle = None
 did_service = None
 blockchain_client = None
@@ -101,9 +104,30 @@ def _status_error_code(status_value: str, details: dict) -> str:
         return details.get("error", "NO_MODEL")
     return details.get("error", "DETECTION_ERROR")
 
+
+def _ensure_detector_ready():
+    global detector, detector_init_error
+    if detector is not None:
+        return detector
+    if DeepfakeDetector is None:
+        raise HTTPException(status_code=503, detail="AI Detector not available")
+
+    with detector_lock:
+        if detector is not None:
+            return detector
+        if detector_init_error is not None:
+            raise HTTPException(status_code=503, detail=f"AI Detector unavailable: {detector_init_error}")
+        try:
+            detector = DeepfakeDetector()
+            print("AI Detector initialized lazily on first request")
+        except Exception as e:
+            detector_init_error = str(e)
+            raise HTTPException(status_code=503, detail=f"AI Detector initialization failed: {e}")
+    return detector
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global detector, zkp_oracle, did_service, blockchain_client
+    global detector, detector_init_error, zkp_oracle, did_service, blockchain_client
     print("Starting Deepfake Verification API...")
     print(f"Detector version: {DETECTOR_VERSION}")
 
@@ -123,19 +147,13 @@ async def lifespan(app: FastAPI):
     
     print(f"Python executable: {sys.executable}")
     
-    # Initialize AI Detector
-    if DeepfakeDetector is not None:
-        model_dir = Path(__file__).parent.parent / "ai_deepfake" / "models"
-        if (model_dir / "best_model.pth").exists() or (model_dir / "best_model_v2.pth").exists():
-            try:
-                detector = DeepfakeDetector()
-                print("AI Detector initialized")
-            except Exception as e:
-                print(f"AI Detector initialization failed: {e}")
-        else:
-            print(f"Model not found at {model_dir}")
+    # Do not initialize detector at startup on low-memory hosts.
+    detector = None
+    detector_init_error = None
+    if DeepfakeDetector is None:
+        print("AI Detector import unavailable - running in limited mode")
     else:
-        print("AI Detector not available - running in limited mode")
+        print("AI Detector will be initialized lazily on first verify request")
     
     # Initialize ZKP Oracle
     zkp_oracle = ZKPOracle(SERVER_PRIVATE_KEY)
@@ -185,6 +203,8 @@ async def health_check():
     return {
         "status": "ok",
         "detector": detector is not None,
+        "detector_lazy": DeepfakeDetector is not None,
+        "detector_init_error": detector_init_error,
         "detector_version": DETECTOR_VERSION,
         "zkp_oracle": zkp_oracle is not None,
         "did_service": did_service is not None,
@@ -231,8 +251,7 @@ async def verify_image(
 ):
     """Verify if an image is real or deepfake and return a signed result"""
     
-    if detector is None:
-        raise HTTPException(status_code=503, detail="AI Detector not initialized")
+    runtime_detector = _ensure_detector_ready()
     
     content_type = (file.content_type or "").lower()
     if not content_type.startswith("image/"):
@@ -255,7 +274,7 @@ async def verify_image(
         image_hash = hashlib.sha256(content).hexdigest()
         
         # Enhanced detector with multi-method analysis
-        detection_result = detector.predict(temp_file.name)
+        detection_result = runtime_detector.predict(temp_file.name)
         
         status_value = _detector_status_value(detection_result)
         if status_value != "ok":
@@ -333,8 +352,7 @@ async def verify_image_zkp(
     Privacy: Backend KHÔNG lưu kết quả, chỉ cung cấp oracle_secret
     """
     
-    if detector is None:
-        raise HTTPException(status_code=503, detail="AI Detector not initialized")
+    runtime_detector = _ensure_detector_ready()
     
     content_type = (file.content_type or "").lower()
     if not content_type.startswith("image/"):
@@ -355,7 +373,7 @@ async def verify_image_zkp(
         # 1. AI Prediction
         image_hash = hashlib.sha256(content).hexdigest()
         
-        detection_result = detector.predict(temp_file.name)
+        detection_result = runtime_detector.predict(temp_file.name)
         
         status_value = _detector_status_value(detection_result)
         if status_value != "ok":
@@ -539,8 +557,7 @@ async def issue_credential(
     Returns:
         Verifiable Credential in W3C format
     """
-    if detector is None:
-        raise HTTPException(status_code=503, detail="AI Detector not initialized")
+    runtime_detector = _ensure_detector_ready()
     
     if not DID_AVAILABLE or did_service is None:
         raise HTTPException(status_code=503, detail="DID Service not available")
@@ -563,7 +580,7 @@ async def issue_credential(
         
         # 1. AI Prediction
         image_hash = hashlib.sha256(content).hexdigest()
-        detection_result = detector.predict(temp_file.name)
+        detection_result = runtime_detector.predict(temp_file.name)
         
         status_value = _detector_status_value(detection_result)
         if status_value != "ok":
