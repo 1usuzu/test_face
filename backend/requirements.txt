@@ -1,3 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 # DeepTrust Core API (backend)
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
@@ -13,9 +15,9 @@ web3>=6.17.0
 httpx>=0.27.0
 
 # AI runtime (CPU-friendly wheels on Linux). If you deploy with CUDA, pin CUDA wheels explicitly.
-torch==2.2.2
-torchvision==0.17.2
-torchaudio==2.2.2
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu
+torchaudio==2.2.2+cpu
 
 # Imaging / numerics
 numpy==1.26.4
@@ -24,4 +26,10 @@ opencv-python==4.11.0.86
 
 # Optional face extractor (used if installed)
 facenet-pytorch==2.6.0
+
+# Config management (used by ai_deepfake/ai_config.py)
+pydantic-settings>=2.0.0
+
+# Testing
+pytest>=8.0.0
 

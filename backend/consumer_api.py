@@ -44,6 +44,13 @@ def _check_api_key(x_api_key: Optional[str]):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
+def _detector_status_value(result) -> str:
+    status = getattr(result, "status", None)
+    if status is None:
+        return "ok"
+    return getattr(status, "value", str(status)).lower()
+
+
 @router.post("/consumer/verify-image")
 async def consumer_verify_image(
     file: UploadFile = File(...),
@@ -79,6 +86,30 @@ async def consumer_verify_image(
         temp_file.close()
 
         result = api.detector.predict(temp_path)
+
+        status_value = _detector_status_value(result)
+        if status_value != "ok":
+            details = result.details if isinstance(result.details, dict) else {}
+            error_msg = details.get("error", status_value)
+            record = {
+                "found": False,
+                "image_hash": image_hash,
+                "label": "ERROR",
+                "confidence": 0.0,
+                "real_prob": 0.0,
+                "fake_prob": 0.0,
+                "risk_level": "unknown",
+                "status": status_value,
+                "error": error_msg,
+                "decision": "REJECTED",
+                "reason": f"Image rejected: detector status={status_value} ({error_msg}).",
+                "verification_link": f"/verify/{image_hash}",
+                "external_id": external_id,
+                "verified_at": int(time.time()),
+                "filename": file.filename or "unknown",
+            }
+            _verified_images[image_hash] = record
+            return record
 
         is_real = not result.is_fake
         label = "REAL" if is_real else "FAKE"

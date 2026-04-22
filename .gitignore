@@ -11,7 +11,10 @@ ENV/
 # AI/ML
 ai_deepfake/dataset_final/
 ai_deepfake/dataset_final.rar
-# Cho phép đẩy các model .pth lên (Sử dụng Git LFS)
+ai_deepfake/models/*.pth
+ai_deepfake/models/*.pt
+ai_deepfake/models/*.onnx
+ai_deepfake/models/*.ckpt
 
 # Node.js
 node_modules/
@@ -35,6 +38,8 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+backend/.env
+frontend/.env
 
 # Local databases / runtime data
 *.db
@@ -49,3 +54,16 @@ dist/
 build/
 
 .agent
+
+# Python test/cache artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# C0/C1 local analysis artifacts (generated, machine-specific)
+docs/*_eval.json
+docs/c1_eval_base.json
+docs/per_image_diff.csv
+docs/baseline_frozen_reproduced.json
+docs/baseline_hardened_same_protocol.json
+frontend/consumer_output.txt

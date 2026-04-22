@@ -1,0 +1,8 @@
+{
+  "network": "amoy",
+  "chainId": 80002,
+  "deepfakeContractAddress": "0x9030C249dAd75aeFB42fdcF6D68d939808968927",
+  "votingFactoryAddress": null,
+  "deployer": "0x657a4d4D6c4d36E7e56f90840Ad453708C82bd9F",
+  "deployedAt": "2026-04-22T07:19:52.298Z"
+}

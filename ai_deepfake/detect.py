@@ -10,7 +10,7 @@ import numpy as np
 import logging
 import time
 from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from enum import Enum
 from pathlib import Path
 
@@ -22,17 +22,23 @@ except ImportError:
     FACE_DETECTION_AVAILABLE = False
     print("Warning: 'facenet-pytorch' not found. Face extraction disabled.")
 
-# Import config
+# Import config — 3-tier: package-relative → absolute → fallback
 try:
-    from ai_config import settings
+    from .ai_config import settings
 except ImportError:
-    # Fallback config
-    class Settings:
-        MODEL_DIR = Path(__file__).parent / "models"
-        DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-        DEFAULT_THRESHOLD = 0.5
-        V1_WEIGHT, V2_WEIGHT = 0.4, 0.6
-    settings = Settings()
+    try:
+        from ai_config import settings
+    except ImportError:
+        class Settings:
+            MODEL_DIR = Path(__file__).parent / "models"
+            DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+            DEFAULT_THRESHOLD = 0.65
+            V1_WEIGHT, V2_WEIGHT = 0.4, 0.6
+            ENABLE_SIGNAL_ANALYSIS = True
+            SIGNAL_LAPLACIAN_THRESHOLD = 100.0
+            SIGNAL_HIGH_FREQ_THRESHOLD = 13.0
+            SIGNAL_BOOST_STEP = 0.03
+        settings = Settings()
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +50,13 @@ try:
 except ImportError:
     CV2_AVAILABLE = False
     logger.warning("OpenCV not found. Signal analysis disabled.")
+
+class DetectionStatus(Enum):
+    OK = "ok"
+    NO_FACE = "no_face"
+    FACE_DETECTION_ERROR = "face_detection_error"
+    NO_MODEL = "no_model"
+    ERROR = "error"
 
 class RiskLevel(Enum):
     LOW = "low"
@@ -59,8 +72,8 @@ class DetectionResult:
     risk_level: RiskLevel
     processing_time: float
     details: Dict[str, Any]
+    status: DetectionStatus = field(default=DetectionStatus.OK)
 
-    # Compatibility alias used by some API layers / older code
     @property
     def fake_prob(self) -> float:
         return float(self.fake_probability)
@@ -72,6 +85,7 @@ class DetectionResult:
     def to_dict(self):
         d = asdict(self)
         d['risk_level'] = self.risk_level.value
+        d['status'] = self.status.value
         return d
 
 class _EfficientNetB4(nn.Module):
@@ -87,13 +101,17 @@ class _EfficientNetB4(nn.Module):
         return self.classifier(self.backbone(x))
 
 class DeepfakeDetector:
-    _instance = None # Singleton Instance
+    _instance = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(DeepfakeDetector, cls).__new__(cls)
             cls._instance._initialized = False
         return cls._instance
+
+    @classmethod
+    def _reset_for_testing(cls):
+        cls._instance = None
 
     def __init__(self):
         if self._initialized: return
@@ -190,8 +208,10 @@ class DeepfakeDetector:
             
             boost = 0.0
             # Ảnh deepfake thường: quá mịn (var thấp) hoặc nhiễu tần số cao (energy cao)
-            if laplacian_var < 100: boost += 0.03 
-            if high_freq_energy > 13.0: boost += 0.03 
+            if laplacian_var < settings.SIGNAL_LAPLACIAN_THRESHOLD:
+                boost += settings.SIGNAL_BOOST_STEP
+            if high_freq_energy > settings.SIGNAL_HIGH_FREQ_THRESHOLD:
+                boost += settings.SIGNAL_BOOST_STEP
             return boost
         except Exception:
             return 0.0
@@ -209,18 +229,12 @@ class DeepfakeDetector:
             # 2. Face Extraction (QUAN TRỌNG)
             if self.mtcnn:
                 try:
-                    # MTCNN trả về tensor đã crop nếu tìm thấy mặt
-                    # Trả về None nếu không tìm thấy
-                    face_tensor = self.mtcnn(img_original)
-                    
-                    if face_tensor is not None:
-                        # Cách đơn giản: Dùng box để crop từ ảnh gốc
-                        boxes, _ = self.mtcnn.detect(img_original)
-                        if boxes is not None:
-                            box = boxes[0] # Lấy mặt to nhất
-                            img_to_process = img_original.crop(box)
-                            face_detected = True
-                            logger.info("Face detected and cropped.")
+                    boxes, _ = self.mtcnn.detect(img_original)
+                    if boxes is not None and len(boxes) > 0:
+                        box = boxes[0] # Lấy mặt to nhất
+                        img_to_process = img_original.crop(box)
+                        face_detected = True
+                        logger.info("Face detected and cropped.")
                     
                     # BẮT BUỘC: Nếu bật Face Detection mà không tìm thấy mặt, phải báo lỗi
                     if not face_detected:
@@ -231,7 +245,8 @@ class DeepfakeDetector:
                             fake_probability=0.0, 
                             risk_level=RiskLevel.LOW, 
                             processing_time=time.time() - start_t,
-                            details={"error": "NO_FACE_DETECTED", "face_detected": False}
+                            details={"error": "NO_FACE_DETECTED", "face_detected": False},
+                            status=DetectionStatus.NO_FACE
                         )
 
                 except Exception as e:
@@ -243,7 +258,8 @@ class DeepfakeDetector:
                         fake_probability=0.0, 
                         risk_level=RiskLevel.LOW, 
                         processing_time=time.time() - start_t,
-                        details={"error": f"FACE_DETECTION_ERROR: {str(e)}", "face_detected": False}
+                            details={"error": f"FACE_DETECTION_ERROR: {str(e)}", "face_detected": False},
+                            status=DetectionStatus.FACE_DETECTION_ERROR
                     )
 
             # 3. Chuẩn bị ảnh cho model (chỗ này img_to_process đã là ảnh crop)
@@ -265,18 +281,27 @@ class DeepfakeDetector:
                     preds.append(prob * settings.V2_WEIGHT)
             
             if not preds:
-                return DetectionResult(False, 0.0, 0.0, RiskLevel.LOW, 0.0, {"error": "No model prediction"})
+                return DetectionResult(
+                    False,
+                    0.0,
+                    0.0,
+                    RiskLevel.LOW,
+                    0.0,
+                    {"error": "No model prediction"},
+                    DetectionStatus.NO_MODEL
+                )
 
             # Weighted Average
             ensemble_prob = sum(preds) / (settings.V1_WEIGHT + settings.V2_WEIGHT)
             
             # 5. Signal Analysis Boost
             # Chỉ boost nếu ảnh là ảnh gốc hoặc ảnh crop chất lượng cao
-            boost = self._analyze_signal(img_np)
+            boost = self._analyze_signal(img_np) if settings.ENABLE_SIGNAL_ANALYSIS else 0.0
             
             # 6. Final Logic
             final_prob = min(1.0, ensemble_prob + boost)
             is_fake = final_prob >= active_thresh
+            confidence = final_prob if is_fake else (1.0 - final_prob)
             
             # 7. Risk Level
             if final_prob > 0.85: r = RiskLevel.CRITICAL
@@ -286,7 +311,7 @@ class DeepfakeDetector:
             
             return DetectionResult(
                 is_fake=is_fake,
-                confidence=final_prob,
+                confidence=confidence,
                 fake_probability=final_prob,
                 risk_level=r,
                 processing_time=time.time() - start_t,
@@ -294,9 +319,18 @@ class DeepfakeDetector:
                     "face_detected": face_detected,
                     "model_score": ensemble_prob, 
                     "signal_boost": boost
-                }
+                },
+                status=DetectionStatus.OK
             )
             
         except Exception as e:
             logger.error(f"Prediction Error: {e}")
-            return DetectionResult(False, 0.0, 0.0, RiskLevel.LOW, 0.0, {"error": str(e)})
+            return DetectionResult(
+                False,
+                0.0,
+                0.0,
+                RiskLevel.LOW,
+                0.0,
+                {"error": str(e)},
+                DetectionStatus.ERROR
+            )

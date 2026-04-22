@@ -1,4 +1,7 @@
 require("@nomicfoundation/hardhat-ethers");
+require("dotenv").config();
+
+const optimizerRuns = Number(process.env.SOLC_OPTIMIZER_RUNS || 200);
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -7,7 +10,7 @@ module.exports = {
     settings: {
       optimizer: {
         enabled: true,
-        runs: 200
+        runs: Number.isFinite(optimizerRuns) ? optimizerRuns : 200
       }
     }
   },

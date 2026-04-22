@@ -1,7 +1,5 @@
 import './WalletConnect.css'
 
-const CONSUMER_APP_URL = import.meta.env.VITE_CONSUMER_APP_URL || 'http://localhost:8001'
-
 function WalletConnect({ account, userDID, onConnect, onDisconnect, onRegisterDID, loading, stats }) {
 
   const formatAddress = (address) => {
@@ -12,12 +10,6 @@ function WalletConnect({ account, userDID, onConnect, onDisconnect, onRegisterDI
   const copyDID = () => {
     if (userDID?.did) {
       navigator.clipboard.writeText(userDID.did).then(() => alert('DID copied to clipboard!'))
-    }
-  }
-
-  const openProfile = () => {
-    if (account) {
-      window.open(`${CONSUMER_APP_URL}/api/health`, '_blank')
     }
   }
 

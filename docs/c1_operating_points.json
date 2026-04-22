@@ -1,0 +1,103 @@
+{
+  "phase": "C1",
+  "protocol_anchor": "94.00% reproducible technical anchor from C0.5",
+  "dataset_path": "D:\\Codes\\face\\ai_deepfake\\dataset_final\\test",
+  "threshold_grid": [
+    0.05,
+    0.1,
+    0.15,
+    0.2,
+    0.25,
+    0.3,
+    0.35,
+    0.4,
+    0.45,
+    0.5,
+    0.55,
+    0.6,
+    0.65,
+    0.7,
+    0.75,
+    0.8,
+    0.85,
+    0.9,
+    0.95
+  ],
+  "default_operating_mode": "balanced",
+  "default_threshold": 0.65,
+  "operating_points": [
+    {
+      "intended_mode": "balanced",
+      "threshold": 0.65,
+      "is_default": true,
+      "measured_metrics": {
+        "accuracy": 0.9644444444444444,
+        "precision_fake": 0.9728506787330317,
+        "recall_fake": 0.9555555555555556,
+        "f1_fake": 0.9641255605381166,
+        "precision_real": 0.9563318777292577,
+        "recall_real": 0.9733333333333334,
+        "f1_real": 0.9647577092511014,
+        "f1_macro": 0.964441634894609,
+        "confusion_matrix": {
+          "tp_fake_as_fake": 215,
+          "tn_real_as_real": 219,
+          "fp_real_as_fake": 6,
+          "fn_fake_as_real": 10
+        }
+      },
+      "short_rationale": "Maximizes f1_macro across real/fake classes on frozen protocol.",
+      "known_tradeoff": "Not optimized for extreme fake recall or extreme fake precision."
+    },
+    {
+      "intended_mode": "high_recall_fake_detection",
+      "threshold": 0.4,
+      "is_default": false,
+      "measured_metrics": {
+        "accuracy": 0.9333333333333333,
+        "precision_fake": 0.8853754940711462,
+        "recall_fake": 0.9955555555555555,
+        "f1_fake": 0.9372384937238493,
+        "precision_real": 0.9949238578680203,
+        "recall_real": 0.8711111111111111,
+        "f1_real": 0.928909952606635,
+        "f1_macro": 0.9330742231652421,
+        "confusion_matrix": {
+          "tp_fake_as_fake": 224,
+          "tn_real_as_real": 196,
+          "fp_real_as_fake": 29,
+          "fn_fake_as_real": 1
+        }
+      },
+      "short_rationale": "Prioritizes catching as many fake samples as possible (very high recall_fake).",
+      "known_tradeoff": "More real images can be flagged fake (higher false positives)."
+    },
+    {
+      "intended_mode": "high_precision_fake_detection",
+      "threshold": 0.75,
+      "is_default": false,
+      "measured_metrics": {
+        "accuracy": 0.94,
+        "precision_fake": 0.9900990099009901,
+        "recall_fake": 0.8888888888888888,
+        "f1_fake": 0.9367681498829039,
+        "precision_real": 0.8991935483870968,
+        "recall_real": 0.9911111111111112,
+        "f1_real": 0.9429175475687104,
+        "f1_macro": 0.9398428487258071,
+        "confusion_matrix": {
+          "tp_fake_as_fake": 200,
+          "tn_real_as_real": 223,
+          "fp_real_as_fake": 2,
+          "fn_fake_as_real": 25
+        }
+      },
+      "short_rationale": "Prioritizes confidence that flagged fake samples are truly fake (high precision_fake).",
+      "known_tradeoff": "Misses more fake samples (lower recall_fake)."
+    }
+  ],
+  "calibration_summary": {
+    "brier_score": 0.05503550247649766,
+    "ece_10": 0.14965497318509607
+  }
+}

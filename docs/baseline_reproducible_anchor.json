@@ -1,0 +1,87 @@
+{
+  "phase": "C0.5",
+  "decision": {
+    "historical_baseline_claim": {
+      "accuracy": 0.8333,
+      "status": "historical_only_not_exactly_auditable",
+      "notes": "Kept for history, not used as reproducible technical comparator until exact lineage artifact is recovered."
+    },
+    "reproducible_technical_anchor": {
+      "accuracy": 0.94,
+      "status": "frozen_for_technical_comparison",
+      "source_artifact": "docs/baseline_hardened_same_protocol.json"
+    },
+    "hardening_label_change_statement": {
+      "prediction_changed_count": 0,
+      "statement": "Hardening did not change predicted labels under the same protocol and dataset in C0 comparison."
+    }
+  },
+  "frozen_protocol": {
+    "dataset": {
+      "path": "D:\\Codes\\face\\ai_deepfake\\dataset_final\\test",
+      "split_assumptions": {
+        "fake_folder_label": "fake",
+        "real_folder_label": "real"
+      }
+    },
+    "threshold": 0.65,
+    "lineage": {
+      "baseline_ai_feature_commit": "8905873",
+      "pr2_commit": "b48c017",
+      "pr3_commit": "cb81991",
+      "pr4_commit": "198ce98",
+      "c0_artifacts_commit": "3cbb20e",
+      "baseline_eval_script_reference": "ai_deepfake/test_model.py (from commit 8905873)",
+      "baseline_detector_script_reference": "ai_deepfake/detect.py (from commit 8905873)"
+    },
+    "models_local_only": [
+      {
+        "file": "best_model.pth",
+        "size_bytes": 16339622,
+        "sha256": "1ae8c63ab7ea5d4629d771c0dba664f1bbfcafa2df713452c523a36d76736bec"
+      },
+      {
+        "file": "best_model_v2.pth",
+        "size_bytes": 296785927,
+        "sha256": "c2d114932ff3586c56c93b0bff3e73883ddafc9b702d247cdc72dc4f6906b01c"
+      }
+    ]
+  },
+  "measured_metrics": {
+    "accuracy": 0.94,
+    "precision_fake": 0.9125,
+    "recall_fake": 0.9733333333333334,
+    "f1_fake": 0.9419354838709678,
+    "precision_real": 0.9714285714285714,
+    "recall_real": 0.9066666666666666,
+    "f1_real": 0.9379310344827586,
+    "f1_macro": 0.9399332591768632
+  },
+  "confusion_matrix": {
+    "tp_fake_as_fake": 219,
+    "tn_real_as_real": 204,
+    "fp_real_as_fake": 21,
+    "fn_fake_as_real": 6
+  },
+  "status_counts": {
+    "ok": 450
+  },
+  "artifacts": {
+    "frozen_reproduced": "docs/baseline_frozen_reproduced.json",
+    "hardened_same_protocol": "docs/baseline_hardened_same_protocol.json",
+    "per_image_diff": "docs/per_image_diff.csv",
+    "lineage_report": "docs/benchmark_lineage_report.md",
+    "decision_record": "docs/baseline_decision_record.md",
+    "protocol_frozen": "docs/baseline_protocol_frozen.md"
+  },
+  "next_phase_gate": {
+    "phase": "C1",
+    "can_start": true,
+    "constraints": [
+      "No model replacement",
+      "No new training",
+      "No baseline history rewrite",
+      "Use frozen protocol as technical anchor"
+    ]
+  }
+}

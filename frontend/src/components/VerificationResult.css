@@ -42,6 +42,16 @@
     border-left: 4px solid var(--danger);
 }
 
+.suspicious .result-header {
+    background: rgba(234, 179, 8, 0.07);
+    border-left: 4px solid var(--warn);
+}
+
+.unavailable .result-header {
+    background: rgba(234, 179, 8, 0.06);
+    border-left: 4px solid var(--warn);
+}
+
 .result-icon {
     width: 64px;
     height: 64px;
@@ -62,6 +72,16 @@
     color: var(--danger);
 }
 
+.suspicious .result-icon {
+    background: rgba(234, 179, 8, 0.15);
+    color: var(--warn);
+}
+
+.unavailable .result-icon {
+    background: rgba(234, 179, 8, 0.12);
+    color: var(--warn);
+}
+
 .result-icon svg {
     width: 32px;
     height: 32px;
@@ -80,6 +100,14 @@
 
 .fake .result-title h3 {
     color: var(--danger);
+}
+
+.suspicious .result-title h3 {
+    color: var(--warn);
+}
+
+.unavailable .result-title h3 {
+    color: var(--warn);
 }
 
 .result-title p {
@@ -150,6 +178,18 @@
 .fake .conf-fill {
     background: var(--danger);
     box-shadow: 0 0 15px var(--danger);
+}
+
+.suspicious .conf-fill {
+    background: var(--warn);
+    box-shadow: 0 0 12px rgba(234, 179, 8, 0.45);
+}
+
+.tier-band-hint {
+    margin-top: 10px;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    line-height: 1.45;
 }
 
 /* Blockchain Proof Terminal */
