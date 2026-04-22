@@ -24,6 +24,7 @@ from eth_account.messages import encode_defunct
 import uvicorn
 import hashlib
 import tempfile
+from typing import Any
 
 def _load_local_env_file() -> None:
     env_file = Path(__file__).parent / ".env"
@@ -57,6 +58,7 @@ except ImportError:
 
 from zkp_oracle import ZKPOracle
 from blockchain_client import BlockchainClient
+from ai_client import AISpaceClient, AIServiceError
 
 # DID System imports - optional, will work without if not installed
 try:
@@ -82,6 +84,7 @@ detector = None
 zkp_oracle = None
 did_service = None
 blockchain_client = None
+ai_client = None
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
@@ -101,9 +104,58 @@ def _status_error_code(status_value: str, details: dict) -> str:
         return details.get("error", "NO_MODEL")
     return details.get("error", "DETECTION_ERROR")
 
+
+def _predict_from_local_detector(content: bytes, filename: str) -> dict[str, Any]:
+    if detector is None:
+        raise HTTPException(status_code=503, detail="AI Detector not initialized")
+
+    suffix = Path(filename).suffix or ".jpg"
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        temp_file.write(content)
+        temp_file.close()
+        detection_result = detector.predict(temp_file.name)
+        status_value = _detector_status_value(detection_result)
+        if status_value != "ok":
+            details = detection_result.details if isinstance(detection_result.details, dict) else {}
+            return {
+                "status": status_value,
+                "label": "ERROR",
+                "message": "Khong the phan loai anh mot cach an toan. Vui long thu lai voi anh khuon mat ro hon.",
+                "error_code": _status_error_code(status_value, details),
+                "face_detected": details.get("face_detected", False),
+                "confidence": 0.0,
+                "risk_level": "unknown",
+                "details": details,
+            }
+
+        fake_prob = float(detection_result.fake_probability)
+        return {
+            "status": "ok",
+            "label": "FAKE" if detection_result.is_fake else "REAL",
+            "confidence": float(detection_result.confidence),
+            "fake_prob": fake_prob,
+            "real_prob": 1.0 - fake_prob,
+            "risk_level": detection_result.risk_level.value,
+            "details": detection_result.details if isinstance(detection_result.details, dict) else {},
+        }
+    finally:
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
+
+
+async def _predict_with_ai_service(content: bytes, filename: str, content_type: str) -> dict[str, Any]:
+    if ai_client is not None:
+        try:
+            return await ai_client.predict(content, filename=filename, content_type=content_type)
+        except AIServiceError as exc:
+            raise HTTPException(status_code=503, detail=f"AI service unavailable: {exc}") from exc
+
+    return _predict_from_local_detector(content, filename)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global detector, zkp_oracle, did_service, blockchain_client
+    global detector, zkp_oracle, did_service, blockchain_client, ai_client, DETECTOR_VERSION
     print("Starting Deepfake Verification API...")
     print(f"Detector version: {DETECTOR_VERSION}")
 
@@ -122,9 +174,18 @@ async def lifespan(app: FastAPI):
         )
     
     print(f"Python executable: {sys.executable}")
+
+    ai_client = AISpaceClient.from_env()
+    if ai_client is not None:
+        DETECTOR_VERSION = "space_http"
+        try:
+            ai_health = await ai_client.health()
+            print(f"AI Space connected: {ai_health}")
+        except Exception as e:
+            print(f"Warning: AI Space health check failed, backend will fail closed on verify endpoints: {e}")
     
     # Initialize AI Detector
-    if DeepfakeDetector is not None:
+    if ai_client is None and DeepfakeDetector is not None:
         model_dir = Path(__file__).parent.parent / "ai_deepfake" / "models"
         if (model_dir / "best_model.pth").exists() or (model_dir / "best_model_v2.pth").exists():
             try:
@@ -134,8 +195,10 @@ async def lifespan(app: FastAPI):
                 print(f"AI Detector initialization failed: {e}")
         else:
             print(f"Model not found at {model_dir}")
-    else:
+    elif ai_client is None:
         print("AI Detector not available - running in limited mode")
+    else:
+        print("Using remote AI Space detector")
     
     # Initialize ZKP Oracle
     zkp_oracle = ZKPOracle(SERVER_PRIVATE_KEY)
@@ -164,6 +227,7 @@ async def lifespan(app: FastAPI):
     yield
     print("Shutting down...")
     detector = None
+    ai_client = None
 
 app = FastAPI(title="Deepfake Verification API", version="1.0.0", lifespan=lifespan)
 
@@ -184,7 +248,8 @@ async def health_check():
     """System health check"""
     return {
         "status": "ok",
-        "detector": detector is not None,
+        "detector": (detector is not None) or (ai_client is not None),
+        "detector_mode": "space_http" if ai_client is not None else "local",
         "detector_version": DETECTOR_VERSION,
         "zkp_oracle": zkp_oracle is not None,
         "did_service": did_service is not None,
@@ -230,86 +295,63 @@ async def verify_image(
     user_address: str = Form(...)  # <--- BẮT BUỘC: Địa chỉ ví người dùng để ký
 ):
     """Verify if an image is real or deepfake and return a signed result"""
-    
-    if detector is None:
-        raise HTTPException(status_code=503, detail="AI Detector not initialized")
-    
+
     content_type = (file.content_type or "").lower()
     if not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
-    
-    temp_file = None
+
     try:
         content = await file.read()
-        
-        # Validate file size
         if len(content) > MAX_FILE_SIZE:
             raise HTTPException(status_code=400, detail="File too large")
-        
-        suffix = Path(file.filename).suffix or ".jpg"
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        temp_file.write(content)
-        temp_file.close()
-        
-        # 1. AI Dự đoán
+
         image_hash = hashlib.sha256(content).hexdigest()
-        
-        # Enhanced detector with multi-method analysis
-        detection_result = detector.predict(temp_file.name)
-        
-        status_value = _detector_status_value(detection_result)
+
+        ai_result = await _predict_with_ai_service(content, file.filename or "upload.jpg", content_type)
+        status_value = str(ai_result.get("status", "error")).lower()
         if status_value != "ok":
-            details = detection_result.details if isinstance(detection_result.details, dict) else {}
             return {
                 "status": status_value,
-                "label": "ERROR",
-                "message": "Không thể phân loại ảnh một cách an toàn. Vui lòng thử lại với ảnh khuôn mặt rõ hơn.",
-                "error_code": _status_error_code(status_value, details),
-                "face_detected": details.get("face_detected", False),
-                "confidence": 0.0,
-                "risk_level": "unknown",
+                "label": ai_result.get("label", "ERROR"),
+                "message": ai_result.get("message", "Khong the phan loai anh mot cach an toan."),
+                "error_code": ai_result.get("error_code", "DETECTION_ERROR"),
+                "face_detected": bool(ai_result.get("face_detected", False)),
+                "confidence": float(ai_result.get("confidence", 0.0)),
+                "risk_level": ai_result.get("risk_level", "unknown"),
             }
 
-        result = {
-            "label": "FAKE" if detection_result.is_fake else "REAL",
-            "confidence": detection_result.confidence,
-            "fake_prob": detection_result.fake_probability,
-            "real_prob": 1 - detection_result.fake_probability,
-            "risk_level": detection_result.risk_level.value
-        }
-        
-        # 2. Logic Ký số (Signing)
-        # Tạo chuỗi thông điệp duy nhất để ký: "UserAddress:ImageHash:IsReal"
-        is_real_str = "true" if result["label"] == "REAL" else "false"
-        msg_content = f"{user_address.lower()}:{image_hash}:{is_real_str}"        
-        # Hash và Ký
+        label = str(ai_result.get("label", "ERROR")).upper()
+        confidence = float(ai_result.get("confidence", 0.0))
+        fake_prob = float(ai_result.get("fake_prob", 0.0))
+        real_prob = float(ai_result.get("real_prob", 1.0 - fake_prob))
+        risk_level = str(ai_result.get("risk_level", "unknown"))
+
+        is_real_str = "true" if label == "REAL" else "false"
+        msg_content = f"{user_address.lower()}:{image_hash}:{is_real_str}"
         message = encode_defunct(text=msg_content)
         signed_message = Account.sign_message(message, private_key=SERVER_PRIVATE_KEY)
         signature = signed_message.signature.hex()
-        
+
         return {
-            "label": result["label"],
-            "confidence": result["confidence"],
-            "real_prob": result.get("real_prob", 1 - result.get("fake_prob", 0)),
-            "fake_prob": result.get("fake_prob", 0),
+            "status": "ok",
+            "label": label,
+            "confidence": confidence,
+            "real_prob": real_prob,
+            "fake_prob": fake_prob,
             "image_hash": image_hash,
             "filename": file.filename,
-            "signature": signature,   # <--- TRẢ VỀ CHỮ KÝ CHO FRONTEND
+            "signature": signature,
             "debug_msg": msg_content,
             "detector_version": DETECTOR_VERSION,
-            "risk_level": result.get("risk_level", "unknown")
+            "risk_level": risk_level,
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal verification error")
-        
-    finally:
-        if temp_file and os.path.exists(temp_file.name):
-            os.unlink(temp_file.name)
 
 
 # ============================================================
@@ -333,93 +375,74 @@ async def verify_image_zkp(
     Privacy: Backend KHÔNG lưu kết quả, chỉ cung cấp oracle_secret
     """
     
-    if detector is None:
-        raise HTTPException(status_code=503, detail="AI Detector not initialized")
-    
     content_type = (file.content_type or "").lower()
     if not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
-    
-    temp_file = None
+
     try:
         content = await file.read()
-        
         if len(content) > MAX_FILE_SIZE:
             raise HTTPException(status_code=400, detail="File too large")
-        
-        suffix = Path(file.filename).suffix or ".jpg"
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        temp_file.write(content)
-        temp_file.close()
-        
-        # 1. AI Prediction
+
         image_hash = hashlib.sha256(content).hexdigest()
-        
-        detection_result = detector.predict(temp_file.name)
-        
-        status_value = _detector_status_value(detection_result)
+
+        ai_result = await _predict_with_ai_service(content, file.filename or "upload.jpg", content_type)
+        status_value = str(ai_result.get("status", "error")).lower()
         if status_value != "ok":
-            details = detection_result.details if isinstance(detection_result.details, dict) else {}
             return {
                 "status": status_value,
                 "can_generate_proof": False,
-                "label": "ERROR",
-                "message": "Không thể tạo ZKP do kết quả phát hiện không hợp lệ.",
-                "error_code": _status_error_code(status_value, details),
-                "face_detected": details.get("face_detected", False),
-                "confidence": 0.0,
+                "label": ai_result.get("label", "ERROR"),
+                "message": ai_result.get("message", "Khong the tao ZKP do ket qua phat hien khong hop le."),
+                "error_code": ai_result.get("error_code", "DETECTION_ERROR"),
+                "face_detected": bool(ai_result.get("face_detected", False)),
+                "confidence": float(ai_result.get("confidence", 0.0)),
             }
 
-        fake_p = float(detection_result.fake_probability)
-        result = {
-            "label": "FAKE" if detection_result.is_fake else "REAL",
-            "confidence": detection_result.confidence,
-            "fake_prob": fake_p,
-            "real_prob": 1.0 - fake_p,
-            "risk_level": detection_result.risk_level.value,
-        }
+        label = str(ai_result.get("label", "ERROR")).upper()
+        fake_p = float(ai_result.get("fake_prob", 0.0))
+        real_p = float(ai_result.get("real_prob", 1.0 - fake_p))
+        confidence = float(ai_result.get("confidence", 0.0))
+        risk_level = str(ai_result.get("risk_level", "unknown"))
 
         timestamp = int(time.time())
 
-        # 2. Chỉ ảnh REAL mới có thể tạo ZK Proof
-        if result["label"] != "REAL":
+        if label != "REAL":
             return {
                 "status": "ok",
                 "can_generate_proof": False,
                 "message": "Chỉ ảnh REAL mới có thể tạo Zero-Knowledge Proof",
-                "label": result["label"],
-                "confidence": result["confidence"],
-                "fake_prob": result["fake_prob"],
-                "real_prob": result["real_prob"],
-                "risk_level": result["risk_level"],
+                "label": label,
+                "confidence": confidence,
+                "fake_prob": fake_p,
+                "real_prob": real_p,
+                "risk_level": risk_level,
                 "image_hash": image_hash,
                 "filename": file.filename,
                 "detector_version": DETECTOR_VERSION,
             }
-        
-        # 3. Tạo ZKP Input
+
         zkp_input = zkp_oracle.create_zkp_input(
             image_hash=image_hash,
             is_real=True,
-            confidence=result["confidence"],
+            confidence=confidence,
             timestamp=timestamp
         )
-        
-        # 4. Tạo signature backup (cho legacy flow)
+
         is_real_str = "true"
         msg_content = f"{user_address.lower()}:{image_hash}:{is_real_str}"
         message = encode_defunct(text=msg_content)
         signed_message = Account.sign_message(message, private_key=SERVER_PRIVATE_KEY)
         signature = signed_message.signature.hex()
-        
+
         return {
             "status": "ok",
             "can_generate_proof": True,
-            "label": result["label"],
-            "confidence": result["confidence"],
-            "fake_prob": result["fake_prob"],
-            "real_prob": result["real_prob"],
-            "risk_level": result["risk_level"],
+            "label": label,
+            "confidence": confidence,
+            "fake_prob": fake_p,
+            "real_prob": real_p,
+            "risk_level": risk_level,
             "image_hash": image_hash,
             "filename": file.filename,
             "detector_version": DETECTOR_VERSION,
@@ -434,7 +457,7 @@ async def verify_image_zkp(
             # Legacy support
             "signature": signature
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -442,9 +465,6 @@ async def verify_image_zkp(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal verification error")
         
-    finally:
-        if temp_file and os.path.exists(temp_file.name):
-            os.unlink(temp_file.name)
 
 
 @app.get("/api/zkp-info")
@@ -539,65 +559,53 @@ async def issue_credential(
     Returns:
         Verifiable Credential in W3C format
     """
-    if detector is None:
-        raise HTTPException(status_code=503, detail="AI Detector not initialized")
-    
     if not DID_AVAILABLE or did_service is None:
         raise HTTPException(status_code=503, detail="DID Service not available")
-    
+
     content_type = (file.content_type or "").lower()
     if not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
-    
-    temp_file = None
+
     try:
         content = await file.read()
-        
         if len(content) > MAX_FILE_SIZE:
             raise HTTPException(status_code=400, detail="File too large")
-        
-        suffix = Path(file.filename).suffix or ".jpg"
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        temp_file.write(content)
-        temp_file.close()
-        
-        # 1. AI Prediction
+
         image_hash = hashlib.sha256(content).hexdigest()
-        detection_result = detector.predict(temp_file.name)
-        
-        status_value = _detector_status_value(detection_result)
+        ai_result = await _predict_with_ai_service(content, file.filename or "upload.jpg", content_type)
+        status_value = str(ai_result.get("status", "error")).lower()
         if status_value != "ok":
             raise HTTPException(
                 status_code=422,
                 detail=f"Detector result is non-classifiable: {status_value}"
             )
 
-        # 2. Create Oracle Signature
-        is_real = not detection_result.is_fake
+        label = str(ai_result.get("label", "ERROR")).upper()
+        confidence = float(ai_result.get("confidence", 0.0))
+        is_real = label == "REAL"
         is_real_str = "true" if is_real else "false"
         msg_content = f"{user_address.lower()}:{image_hash}:{is_real_str}"
         message = encode_defunct(text=msg_content)
         signed_message = Account.sign_message(message, private_key=SERVER_PRIVATE_KEY)
         signature = signed_message.signature.hex()
-        
-        # 3. Issue Verifiable Credential
+
         credential = did_service.issue_verification_credential(
             user_address=user_address,
             image_hash=image_hash,
             is_real=is_real,
-            confidence=detection_result.confidence,
+            confidence=confidence,
             oracle_signature=signature
         )
-        
+
         return {
-            "label": "REAL" if is_real else "FAKE",
-            "confidence": detection_result.confidence,
+            "label": label,
+            "confidence": confidence,
             "image_hash": image_hash,
             "credential": credential.to_dict(),
             "credential_id": credential.id,
             "signature": signature
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -605,9 +613,6 @@ async def issue_credential(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal verification error")
         
-    finally:
-        if temp_file and os.path.exists(temp_file.name):
-            os.unlink(temp_file.name)
 
 
 @app.post("/api/credential/verify")
