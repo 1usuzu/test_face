@@ -44,9 +44,26 @@ const normalizeDidDocument = (didDoc) => {
   };
 };
 
-const getReadableError = (error) => {
-  if (!error) return 'Unknown error';
-  return error.shortMessage || error.reason || error.message || String(error);
+const isUserRejectedError = (error) => {
+  const code = error?.code ?? error?.info?.error?.code;
+  const reason = error?.reason;
+  return code === 4001 || code === 'ACTION_REJECTED' || reason === 'rejected';
+};
+
+const formatTxError = (actionLabel, error) => {
+  if (isUserRejectedError(error)) {
+    return `Bạn đã hủy giao dịch ${actionLabel} trên MetaMask. Không có thay đổi nào được ghi lên blockchain.`;
+  }
+  const detail = error?.shortMessage || error?.reason || error?.info?.error?.message || error?.message || 'Không xác định';
+  return `${actionLabel} thất bại: ${detail}`;
+};
+
+const formatWalletActionError = (actionLabel, error) => {
+  if (isUserRejectedError(error)) {
+    return `Bạn đã hủy thao tác ${actionLabel} trên MetaMask.`;
+  }
+  const detail = error?.shortMessage || error?.reason || error?.info?.error?.message || error?.message || 'Không xác định';
+  return `${actionLabel} thất bại: ${detail}`;
 };
 
 /**
@@ -130,7 +147,7 @@ function App() {
       return {
         ...currentResult,
         onChain: false,
-        onChainError: getReadableError(error)
+        onChainError: formatTxError('ghi kết quả xác thực', error)
       };
     }
   };
@@ -206,6 +223,7 @@ function App() {
 
     } catch (error) {
       console.error("Failed to connect wallet:", error);
+      alert(formatWalletActionError('kết nối ví', error));
     }
   };
 
@@ -240,7 +258,7 @@ function App() {
       alert("Đăng ký DID thành công!");
     } catch (error) {
       console.error("Register Error:", error);
-      alert("Lỗi đăng ký: " + error.message);
+      alert(formatTxError('đăng ký DID', error));
     } finally { setLoading(false); }
   };
 

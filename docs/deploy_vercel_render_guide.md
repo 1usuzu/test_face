@@ -193,4 +193,3 @@ Flow đề xuất:
 - Giới hạn CORS theo domain cụ thể (không để `*` lâu dài).
 - Bật branch protection cho nhánh release.
 - Theo dõi log lỗi trong 24h đầu sau release.
-

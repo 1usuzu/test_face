@@ -12,6 +12,28 @@ const factoryAddress = import.meta.env.VITE_VOTING_FACTORY_ADDRESS || VotingFact
 const factoryABI = VotingFactoryABI.abi || [];
 const votingABI = VotingABI.abi || [];
 
+const isUserRejectedError = (error) => {
+  const code = error?.code ?? error?.info?.error?.code;
+  const reason = error?.reason;
+  return code === 4001 || code === "ACTION_REJECTED" || reason === "rejected";
+};
+
+const formatTxError = (actionLabel, error) => {
+  if (isUserRejectedError(error)) {
+    return `Bạn đã hủy giao dịch ${actionLabel} trên MetaMask. Không có thay đổi nào được ghi lên blockchain.`;
+  }
+  const detail = error?.shortMessage || error?.reason || error?.info?.error?.message || error?.message || "Không xác định";
+  return `${actionLabel} thất bại: ${detail}`;
+};
+
+const formatWalletActionError = (actionLabel, error) => {
+  if (isUserRejectedError(error)) {
+    return `Bạn đã hủy thao tác ${actionLabel} trên MetaMask.`;
+  }
+  const detail = error?.shortMessage || error?.reason || error?.info?.error?.message || error?.message || "Không xác định";
+  return `${actionLabel} thất bại: ${detail}`;
+};
+
 export const VotingProvider = ({ children }) => {
   // ── Wallet ────────────────────────────────────────────────────────────────
   const [currentAccount, setCurrentAccount] = useState(null);
@@ -93,7 +115,7 @@ export const VotingProvider = ({ children }) => {
       }
       return true;
     } catch (error) {
-      alert(error.reason || error.message);
+      alert(formatTxError("tạo cuộc bầu chọn", error));
       return false;
     } finally {
       setIsLoading(false);
@@ -194,7 +216,7 @@ export const VotingProvider = ({ children }) => {
       await loadVotingData();
       alert("Bỏ phiếu thành công!");
     } catch (error) {
-      alert(error.reason || error.message);
+      alert(formatTxError("bỏ phiếu", error));
     } finally {
       setIsLoading(false);
     }
@@ -211,7 +233,7 @@ export const VotingProvider = ({ children }) => {
       await loadVotingData();
       alert("Thêm ứng viên thành công!");
     } catch (error) {
-      alert(error.reason || error.message);
+      alert(formatTxError("thêm ứng viên", error));
     } finally {
       setIsLoading(false);
     }
@@ -227,7 +249,7 @@ export const VotingProvider = ({ children }) => {
       await loadVotingData();
       alert("Đã đóng bầu cử thành công!");
     } catch (error) {
-      alert(error.reason || error.message);
+      alert(formatTxError("đóng bầu cử", error));
     } finally {
       setIsLoading(false);
     }
@@ -242,7 +264,7 @@ export const VotingProvider = ({ children }) => {
       await loadVotingData();
       alert("Đã mở bầu cử thành công!");
     } catch (error) {
-      alert(error.reason || error.message);
+      alert(formatTxError("mở bầu cử", error));
     } finally {
       setIsLoading(false);
     }
@@ -303,6 +325,7 @@ export const VotingProvider = ({ children }) => {
       await initFactoryContract();
     } catch (error) {
       console.error("Error connecting wallet:", error);
+      alert(formatWalletActionError("kết nối ví", error));
     }
   };
 
