@@ -72,9 +72,9 @@ SERVER_PRIVATE_KEY = os.environ.get("SERVER_PRIVATE_KEY")
 ALLOW_INSECURE_DEV_KEY = os.environ.get("ALLOW_INSECURE_DEV_KEY", "false").lower() == "true"
 INSECURE_DEV_PRIVATE_KEY = os.environ.get("INSECURE_DEV_PRIVATE_KEY")
 
-# CORS origins: mặc định chỉ cho frontend local
-_default_origins = "http://localhost:5173,http://127.0.0.1:5173"
-_origins_env = os.environ.get("ALLOWED_ORIGINS", _default_origins)
+# CORS origins: read from ALLOWED_ORIGINS env (comma-separated).
+# Example: "https://app.vercel.app,https://consumer.vercel.app"
+_origins_env = os.environ.get("ALLOWED_ORIGINS", "*")
 ALLOWED_ORIGINS = [origin.strip() for origin in _origins_env.split(",") if origin.strip()]
 ALLOW_CREDENTIALS = "*" not in ALLOWED_ORIGINS
 
@@ -655,4 +655,4 @@ async def get_did_info():
 
 
 if __name__ == "__main__":
-    uvicorn.run("api:app", host="0.0.0.0", port=8000)
+    uvicorn.run("api:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
